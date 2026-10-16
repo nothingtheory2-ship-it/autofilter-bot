@@ -10,13 +10,28 @@ except RuntimeError:
 import os
 import sys
 import logging
-import certifi
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 
 logging.basicConfig(level=logging.INFO)
 
-# Environment Variables
+# 1. Render Port Binding Fix (Render Web Service को शांत रखने के लिए डमी सर्वर)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is Running!")
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_http_server, daemon=True).start()
+
+# 2. Environment Variables पढ़ना
 try:
     API_ID = int(os.environ["API_ID"].strip())
     API_HASH = os.environ["API_HASH"].strip()
@@ -28,12 +43,16 @@ except Exception as e:
     print(f"ERROR: Variable Missing or Invalid Format -> {e}")
     sys.exit(1)
 
-# MongoDB Connection with SSL Fix
-mongo_client = AsyncIOMotorClient(DATABASE_URI, tlsCAFile=certifi.where())
+# 3. MongoDB Connection (SSL Handshake Error Fix)
+mongo_client = AsyncIOMotorClient(
+    DATABASE_URI,
+    tls=True,
+    tlsAllowInvalidCertificates=True
+)
 db = mongo_client[DATABASE_NAME]
 collection = db["files"]
 
-# Bot Client
+# 4. Bot Client Initialize
 app = Client(
     "AutoFilterBot",
     api_id=API_ID,
@@ -48,7 +67,7 @@ async def start_cmd(client, message):
         "बॉट पूरी तरह चालू है। किसी भी फाइल या मूवी का नाम लिखकर भेजें, मैं आपको फ़ाइल ढूँढ कर दूँगा।"
     )
 
-# Save New Files from Channel to Database
+# चैनल में नई फाइल आते ही MongoDB में सेव करना
 @app.on_message(filters.chat(CHANNEL_ID) & (filters.document | filters.video | filters.audio))
 async def save_channel_files(client, message):
     media = message.document or message.video or message.audio
@@ -66,7 +85,7 @@ async def save_channel_files(client, message):
         )
         print(f"सहेजी गई फाइल: {media.file_name}")
 
-# Search and Send Files to Users
+# यूज़र के सर्च करने पर फाइल भेजना
 @app.on_message(filters.private & filters.text & ~filters.command(["start", "help"]))
 async def search_files(client, message):
     query = message.text.lower().strip()
