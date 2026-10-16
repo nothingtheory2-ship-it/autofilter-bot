@@ -1,6 +1,6 @@
 import asyncio
 
-# Python 3.14 Event Loop Crash Fix (Must be at the very top)
+# Python Event Loop Fix
 try:
     loop = asyncio.get_event_loop()
 except RuntimeError:
@@ -10,13 +10,13 @@ except RuntimeError:
 import os
 import sys
 import logging
+import certifi
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Logs Setup
 logging.basicConfig(level=logging.INFO)
 
-# Environment Variables Read & Verify
+# Environment Variables
 try:
     API_ID = int(os.environ["API_ID"].strip())
     API_HASH = os.environ["API_HASH"].strip()
@@ -28,12 +28,12 @@ except Exception as e:
     print(f"ERROR: Variable Missing or Invalid Format -> {e}")
     sys.exit(1)
 
-# MongoDB Connection
-mongo_client = AsyncIOMotorClient(DATABASE_URI)
+# MongoDB Connection with SSL Fix
+mongo_client = AsyncIOMotorClient(DATABASE_URI, tlsCAFile=certifi.where())
 db = mongo_client[DATABASE_NAME]
 collection = db["files"]
 
-# Bot Client Initialize
+# Bot Client
 app = Client(
     "AutoFilterBot",
     api_id=API_ID,
@@ -41,7 +41,6 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# Start Command
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message):
     await message.reply_text(
@@ -74,16 +73,17 @@ async def search_files(client, message):
     results = collection.find({"file_name": {"$regex": query, "$options": "i"}}).limit(10)
     
     found = False
-    async for item in results:
-        found = True
-        try:
+    try:
+        async for item in results:
+            found = True
             await client.send_cached_media(
                 chat_id=message.chat.id,
                 file_id=item["file_id"],
                 caption=item.get("caption", item["file_name"])
             )
-        except Exception as e:
-            await message.reply_text(f"फाइल भेजने में समस्या: {e}")
+    except Exception as e:
+        await message.reply_text(f"डेटाबेस एरर: {e}")
+        return
 
     if not found:
         await message.reply_text("माफ़ कीजिए, इस नाम से कोई फाइल नहीं मिली। कृपया सही नाम लिखकर भेजें।")
