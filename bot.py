@@ -1,13 +1,22 @@
+import asyncio
+
+# Python 3.14 Event Loop Crash Fix (Must be at the very top)
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 import os
 import sys
 import logging
 from pyrogram import Client, filters
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# लॉगिंग सेट अप ताकि एरर साफ़ दिखे
+# Logs Setup
 logging.basicConfig(level=logging.INFO)
 
-# वेरिएबल्स पढ़ना
+# Environment Variables Read & Verify
 try:
     API_ID = int(os.environ["API_ID"].strip())
     API_HASH = os.environ["API_HASH"].strip()
@@ -16,15 +25,15 @@ try:
     CHANNEL_ID = int(os.environ["CHANNELS"].strip())
     DATABASE_NAME = os.environ.get("DATABASE_NAME", "AutoFilter").strip()
 except Exception as e:
-    print(f"ERROR: Variable Missing या गलत फॉर्मेट में है -> {e}")
+    print(f"ERROR: Variable Missing or Invalid Format -> {e}")
     sys.exit(1)
 
-# डेटाबेस कनेक्शन
+# MongoDB Connection
 mongo_client = AsyncIOMotorClient(DATABASE_URI)
 db = mongo_client[DATABASE_NAME]
 collection = db["files"]
 
-# बॉट इनिशियलाइज़
+# Bot Client Initialize
 app = Client(
     "AutoFilterBot",
     api_id=API_ID,
@@ -32,14 +41,15 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
+# Start Command
 @app.on_message(filters.command("start") & filters.private)
-async def start_command(client, message):
+async def start_cmd(client, message):
     await message.reply_text(
         f"नमस्ते {message.from_user.first_name}!\n\n"
-        "मैं एक ऑटो-फ़िल्टर बॉट हूँ। मूवी या फाइल का नाम लिखकर भेजें, मैं आपको फ़ाइल ढूँढ कर दूँगा।"
+        "बॉट पूरी तरह चालू है। किसी भी फाइल या मूवी का नाम लिखकर भेजें, मैं आपको फ़ाइल ढूँढ कर दूँगा।"
     )
 
-# चैनल में आने वाली नई फाइल्स सेव करना
+# Save New Files from Channel to Database
 @app.on_message(filters.chat(CHANNEL_ID) & (filters.document | filters.video | filters.audio))
 async def save_channel_files(client, message):
     media = message.document or message.video or message.audio
@@ -55,9 +65,9 @@ async def save_channel_files(client, message):
             {"$set": file_data},
             upsert=True
         )
-        print(f"फाइल सेव हुई: {media.file_name}")
+        print(f"सहेजी गई फाइल: {media.file_name}")
 
-# यूज़र के मैसेज सर्च करना
+# Search and Send Files to Users
 @app.on_message(filters.private & filters.text & ~filters.command(["start", "help"]))
 async def search_files(client, message):
     query = message.text.lower().strip()
@@ -73,7 +83,7 @@ async def search_files(client, message):
                 caption=item.get("caption", item["file_name"])
             )
         except Exception as e:
-            await message.reply_text(f"फाइल भेजने में एरर: {e}")
+            await message.reply_text(f"फाइल भेजने में समस्या: {e}")
 
     if not found:
         await message.reply_text("माफ़ कीजिए, इस नाम से कोई फाइल नहीं मिली। कृपया सही नाम लिखकर भेजें।")
